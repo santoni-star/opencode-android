@@ -21,6 +21,14 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: "platform-tools"
+      - name: Build fake-chroot-ng for arm64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu make
+          git clone --depth 1 https://github.com/sylirre/fake-chroot-ng.git /tmp/fake-chroot-ng
+          make -C /tmp/fake-chroot-ng CROSS=aarch64-linux-gnu-
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          install -m 0755 /tmp/fake-chroot-ng/build/chroot-ng app/src/main/jniLibs/arm64-v8a/libchroot_ng.so
       - name: Install SDK components
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Build debug APK

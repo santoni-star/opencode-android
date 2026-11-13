@@ -32,3 +32,6 @@ Debug APK очікується за адресою `app/build/outputs/apk/debug/
 - [Збірка та CI](docs/BUILD.md)
 - [Архітектура й потік виконання](docs/ARCHITECTURE.md)
 - [Безпека та відомі ризики](docs/SECURITY.md)
+
+### Runtime dependency in CI
+The GitHub Actions workflow cross-compiles `sylirre/fake-chroot-ng` for AArch64 and packages it as `app/src/main/jniLibs/arm64-v8a/libchroot_ng.so`. The file is an executable helper binary (not an Android shared library); legacy JNI packaging preserves its executable mode for extraction from `nativeLibraryDir`. The upstream project is experimental; see [Security](docs/SECURITY.md).
