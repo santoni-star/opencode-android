@@ -24,9 +24,8 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: 35
-          ndk-version: r27c
-          build-tools: 35.0.0
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          accept-android-sdk-licenses: true
 
       - name: Grant execute permission to gradlew
         run: chmod +x gradlew
@@ -70,16 +69,14 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: 35
-          ndk-version: r27c
-          build-tools: 35.0.0
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          accept-android-sdk-licenses: true
 
       - name: Grant execute permission to gradlew
         run: chmod +x gradlew
 
       - name: Run lint
         run: ./gradlew :app:lintDebug --console=plain
-        continue-on-error: true
 
       - name: Upload lint report
         uses: actions/upload-artifact@v4
