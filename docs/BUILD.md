@@ -29,3 +29,5 @@ Gradle-кешування налаштоване через `actions/setup-java`
 Для успішного проходження bootstrap потрібно додати arm64-сумісний `fake-chroot-ng` як `app/src/main/jniLibs/arm64-v8a/libchroot_ng.so` або забезпечити шлях `files/env/bin/chroot-ng` у середовищі застосунку. Без цього перевірка backend завершиться помилкою до завантаження CLI. Маніфест запитує `INTERNET`; застосунок завантажує архів CLI під час першого запуску.
 
 Збірка не є тестом сумісності SELinux/W^X, запуску на різних пристроях чи автентичності завантаженого архіву. Релізне підписування і публікація в репозиторії не налаштовані.
+
+The CI workflow also builds `fake-chroot-ng` for AArch64 and packages it as an executable helper. The APK's current app UI uses OpenCode's non-interactive `run` command; it does not provide a PTY-backed full-screen interface.

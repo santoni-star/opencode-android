@@ -24,3 +24,6 @@
 ## Залежності
 
 AndroidX Core KTX, AppCompat і Kotlin Coroutines Android оголошені в `app/build.gradle.kts`. Репозиторії залежностей — Google і Maven Central; plugin repositories також містять Gradle Plugin Portal.
+
+## Mobile interaction scope
+The Android screen uses `opencode run <prompt>` for request/response interaction. It is intentionally not the full-screen TUI: Android `ProcessBuilder` pipes do not provide a PTY. The current app downloads only the standalone Linux ARM64 musl OpenCode CLI; it does not install/select Ubuntu, Debian, Alpine, or another Linux distribution/rootfs. OpenCode provider credentials and models must be configured by the user through OpenCode's supported configuration before requests can succeed. A distro picker should only be added together with a verified rootfs download, extraction, storage, and update flow.
