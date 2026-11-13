@@ -3,7 +3,8 @@
 OpenCode Android runs the official OpenCode CLI in a Debian Trixie ARM64
 environment on-device. It includes a touch-friendly terminal, a two-row
 Termux-inspired key panel, focus mode, an authenticated loopback web UI, a
-persistent workspace, and light, dark, and Dracula visual themes.
+persistent workspace, first-run tip cards, and System, Light, Dark, AMOLED,
+and Dracula visual themes.
 
 The interface language follows the Android system language (Ukrainian or
 English). Terminal typefaces and size are configurable in Visual settings.

@@ -2,8 +2,10 @@ package com.opencode.android;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -17,12 +19,14 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.HttpAuthHandler;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -39,16 +43,17 @@ public final class MainActivity extends Activity {
     private static final String SCREEN_HOME = "home";
     private static final String SCREEN_CONSOLE = "console";
     private static final String SCREEN_SETTINGS = "settings";
-    private static final String SCREEN_GUIDE = "guide";
     private static final String SCREEN_SETUP = "setup";
     private static final String SCREEN_WEB = "web";
+    private static final String PREF_ONBOARDING_COMPLETED = "onboarding_completed";
+    private static final String PREF_SHOW_ON_STARTUP = "show_onboarding_at_startup";
+    private static final int ONBOARDING_STEPS = 3;
 
     private SharedPreferences preferences;
     private Prefs runtimePrefs;
     private String screen = SCREEN_HOME;
     private String theme;
     private String font;
-    private String distro;
     private int terminalFontSize;
     private boolean focusMode;
     private boolean controlArmed;
@@ -66,6 +71,9 @@ public final class MainActivity extends Activity {
     private volatile boolean busy;
     private boolean webLoading;
     private String runtimeStage;
+    private Dialog onboardingDialog;
+    private int onboardingStep;
+    private boolean onboardingShowAtStart;
 
     private final Session.Listener sessionListener = new Session.Listener() {
         @Override
@@ -101,15 +109,22 @@ public final class MainActivity extends Activity {
         runtimePrefs = new Prefs(this);
         theme = preferences.getString("theme", "system");
         font = preferences.getString("font", "jetbrains");
-        distro = "debian";
         terminalFontSize = preferences.getInt("terminal_font_size", 14);
         Session.get().addListener(sessionListener);
         render();
+        if (!preferences.getBoolean(PREF_ONBOARDING_COMPLETED, false)
+                || preferences.getBoolean(PREF_SHOW_ON_STARTUP, false)) {
+            root.post(this::showOnboarding);
+        }
     }
 
     @Override
     protected void onDestroy() {
         Session.get().removeListener(sessionListener);
+        if (onboardingDialog != null) {
+            onboardingDialog.dismiss();
+            onboardingDialog = null;
+        }
         if (webView != null) webView.destroy();
         super.onDestroy();
     }
@@ -173,7 +188,6 @@ public final class MainActivity extends Activity {
             content.setPadding(dp(20), dp(14), dp(20), dp(24));
             if (SCREEN_HOME.equals(screen)) buildHome(content);
             else if (SCREEN_SETTINGS.equals(screen)) buildSettings(content);
-            else if (SCREEN_GUIDE.equals(screen)) buildGuide(content);
             else buildSetup(content);
             scroll.addView(content);
             root.addView(scroll, new LinearLayout.LayoutParams(
@@ -183,7 +197,7 @@ public final class MainActivity extends Activity {
             }
         }
 
-        if (!(SCREEN_CONSOLE.equals(screen) && focusMode)) {
+        if (SCREEN_SETTINGS.equals(screen)) {
             root.addView(buildNavigation());
         }
         setContentView(root);
@@ -264,10 +278,108 @@ public final class MainActivity extends Activity {
             return true;
         });
         menu.getMenu().add(text("menu_guide")).setOnMenuItemClickListener(item -> {
-            navigate(SCREEN_GUIDE);
+            showOnboarding();
             return true;
         });
         menu.show();
+    }
+
+    private void showOnboarding() {
+        if (isFinishing() || (onboardingDialog != null && onboardingDialog.isShowing())) return;
+        onboardingStep = 0;
+        onboardingShowAtStart = preferences.getBoolean(PREF_SHOW_ON_STARTUP, false);
+        showOnboardingStep();
+    }
+
+    private void showOnboardingStep() {
+        Dialog dialog = new Dialog(this);
+        onboardingDialog = dialog;
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(22), dp(20), dp(22), dp(18));
+        card.setBackground(shape(palette.surface, palette.border, 24));
+
+        TextView progress = label(String.format(Locale.getDefault(), "%d / %d",
+                onboardingStep + 1, ONBOARDING_STEPS), 11, palette.accent, true);
+        progress.setLetterSpacing(0.08f);
+        card.addView(progress);
+        addGap(card, 10);
+        card.addView(label(text("onboarding_step" + (onboardingStep + 1) + "_title"),
+                21, palette.text, true));
+        addGap(card, 8);
+        card.addView(label(text("onboarding_step" + (onboardingStep + 1) + "_body"),
+                14, palette.muted, false));
+        addGap(card, 15);
+
+        CheckBox repeat = new CheckBox(this);
+        repeat.setText(text("onboarding_show_at_start"));
+        repeat.setTextColor(palette.text);
+        repeat.setButtonTintList(ColorStateList.valueOf(palette.accent));
+        repeat.setChecked(onboardingShowAtStart);
+        repeat.setOnCheckedChangeListener((button, checked) -> onboardingShowAtStart = checked);
+        card.addView(repeat);
+        addGap(card, 12);
+
+        LinearLayout actions = horizontal();
+        TextView back = secondaryButton(onboardingStep == 0
+                ? text("action_skip") : text("action_back"), () -> {
+            onboardingShowAtStart = repeat.isChecked();
+            if (onboardingStep == 0) {
+                completeOnboarding();
+            } else {
+                onboardingStep--;
+                dialog.dismiss();
+                showOnboardingStep();
+            }
+        });
+        actions.addView(back, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        View gap = new View(this);
+        actions.addView(gap, new LinearLayout.LayoutParams(dp(9), 1));
+        TextView next = primaryButton(onboardingStep == ONBOARDING_STEPS - 1
+                ? text("action_done") : text("action_next"), () -> {
+            onboardingShowAtStart = repeat.isChecked();
+            if (onboardingStep == ONBOARDING_STEPS - 1) {
+                completeOnboarding();
+            } else {
+                onboardingStep++;
+                dialog.dismiss();
+                showOnboardingStep();
+            }
+        });
+        actions.addView(next, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        card.addView(actions);
+
+        dialog.setContentView(card);
+        dialog.setCancelable(true);
+        dialog.setOnCancelListener(ignored -> {
+            onboardingShowAtStart = repeat.isChecked();
+            completeOnboarding();
+        });
+        dialog.setOnDismissListener(ignored -> {
+            if (onboardingDialog == dialog) onboardingDialog = null;
+        });
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.9f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.dimAmount = 0.55f;
+            window.setAttributes(params);
+        }
+    }
+
+    private void completeOnboarding() {
+        preferences.edit()
+                .putBoolean(PREF_ONBOARDING_COMPLETED, true)
+                .putBoolean(PREF_SHOW_ON_STARTUP, onboardingShowAtStart)
+                .apply();
+        Dialog dialog = onboardingDialog;
+        onboardingDialog = null;
+        if (dialog != null) dialog.dismiss();
     }
 
     private View buildNavigation() {
@@ -302,110 +414,30 @@ public final class MainActivity extends Activity {
     }
 
     private void buildHome(LinearLayout content) {
-        TextView eyebrow = label(text("home_eyebrow"), 11, palette.accent, true);
-        eyebrow.setLetterSpacing(0.11f);
-        content.addView(eyebrow);
-        addGap(content, 7);
-        content.addView(label(text("home_title"), 29, palette.text, true));
-        addGap(content, 7);
-        content.addView(label(text("home_description"), 14, palette.muted, false));
-        addGap(content, 20);
+        Env env = Env.get(this);
+        boolean rootfsReady = env.rootfsInstalled();
+        boolean openCodeReady = env.openCodeInstalled();
 
-        LinearLayout notice = card();
-        TextView noticeTitle = label("◌  " + runtimeStatusText(), 15, palette.text, true);
-        notice.addView(noticeTitle);
-        addGap(notice, 6);
-        notice.addView(label(text(Env.get(this).rootfsInstalled()
-                ? "runtime_ready_explanation" : "runtime_explanation"), 13, palette.muted, false));
-        content.addView(notice);
-        addGap(content, 20);
+        LinearLayout status = card();
+        status.addView(label(runtimeStatusText(), 19, palette.text, true));
+        addGap(status, 5);
+        status.addView(label(text(rootfsReady
+                ? (openCodeReady ? "home_ready" : "home_linux_ready")
+                : "home_not_ready"), 13, palette.muted, false));
+        content.addView(status);
+        addGap(content, 12);
 
-        content.addView(sectionTitle(text("os_heading")));
-        addGap(content, 9);
-        addDistroCard(content, "debian", text("debian_title"), text("debian_description"), text("recommended"));
-        addGap(content, 9);
-        addDistroCard(content, "ubuntu", text("ubuntu_title"),
-                text("ubuntu_unavailable"), text("unavailable"));
-        addGap(content, 17);
-
-        LinearLayout tool = card();
-        LinearLayout toolHeader = horizontal();
-        TextView toolIcon = label("⌘", 23, palette.accent, true);
-        toolIcon.setGravity(Gravity.CENTER);
-        toolIcon.setBackground(shape(palette.accentSoft, palette.accentSoft, 15));
-        toolIcon.setWidth(dp(48));
-        toolIcon.setHeight(dp(48));
-        toolHeader.addView(toolIcon);
-        LinearLayout toolInfo = new LinearLayout(this);
-        toolInfo.setOrientation(LinearLayout.VERTICAL);
-        toolInfo.setPadding(dp(12), dp(2), 0, 0);
-        toolInfo.addView(label("OpenCode", 16, palette.text, true));
-        toolInfo.addView(label(text("tool_description"), 12, palette.muted, false));
-        toolHeader.addView(toolInfo);
-        tool.addView(toolHeader);
-        addGap(tool, 12);
-        tool.addView(label(text("tool_auth_note"), 12, palette.muted, false));
-        content.addView(tool);
-        addGap(content, 16);
-
-        content.addView(primaryButton(text("action_prepare"), this::prepareEnvironment));
-        addGap(content, 9);
-        LinearLayout actions = horizontal();
-        actions.addView(secondaryButton(text("action_opencode"),
-                        () -> launchMode(GuestCommand.MODE_BOOT, SCREEN_CONSOLE)),
-                new LinearLayout.LayoutParams(0, dp(46), 1));
-        View spacer = new View(this);
-        actions.addView(spacer, new LinearLayout.LayoutParams(dp(9), 1));
-        actions.addView(secondaryButton(text("action_shell"),
-                        () -> launchMode(GuestCommand.MODE_SHELL, SCREEN_CONSOLE)),
-                new LinearLayout.LayoutParams(0, dp(46), 1));
-        content.addView(actions);
-        addGap(content, 9);
-        content.addView(secondaryButton(text("action_web"),
-                () -> launchMode(GuestCommand.MODE_WEB, SCREEN_WEB)));
-        addGap(content, 17);
-        content.addView(label(text("storage_note"), 11, palette.muted, false));
-    }
-
-    private void addDistroCard(LinearLayout parent, String id, String title, String description, String badge) {
-        boolean available = "debian".equals(id);
-        boolean selected = id.equals(distro);
-        LinearLayout option = card();
-        option.setBackground(shape(selected ? palette.accentSoft : palette.surface,
-                selected ? palette.accent : palette.border, 18));
-        option.setAlpha(available ? 1f : 0.58f);
-        LinearLayout top = horizontal();
-        TextView radio = label(selected ? "●" : "○", 17,
-                selected ? palette.accent : palette.muted, true);
-        top.addView(radio);
-        TextView name = label(title, 15, palette.text, true);
-        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, -2, 1);
-        nameParams.leftMargin = dp(9);
-        top.addView(name, nameParams);
-        if (badge != null) {
-            TextView recommended = label(badge, 10, palette.accent, true);
-            recommended.setPadding(dp(8), dp(5), dp(8), dp(5));
-            recommended.setBackground(shape(palette.surface, palette.surface, 12));
-            top.addView(recommended);
+        if (!rootfsReady || !openCodeReady) {
+            content.addView(primaryButton(text("action_prepare"), this::prepareEnvironment));
+        } else {
+            content.addView(primaryButton(text("action_opencode"),
+                    () -> launchMode(GuestCommand.MODE_BOOT, SCREEN_CONSOLE)));
         }
-        option.addView(top);
-        addGap(option, 6);
-        TextView detail = label(description + "\n" + text("arch_badge"), 12, palette.muted, false);
-        detail.setPadding(dp(26), 0, 0, 0);
-        option.addView(detail);
-        if (available) {
-            option.setOnClickListener(v -> {
-                distro = id;
-                preferences.edit().putString("distro", id).apply();
-                render();
-            });
-        }
-        parent.addView(option);
+        addGap(content, 8);
+        content.addView(secondaryButton(text("action_console"), () -> navigate(SCREEN_CONSOLE)));
     }
 
     private void buildConsole() {
-        if (focusMode) root.addView(buildFocusStrip());
-
         if (!focusMode) {
             LinearLayout controls = horizontal();
             controls.setPadding(dp(12), dp(8), dp(12), dp(3));
@@ -438,24 +470,40 @@ public final class MainActivity extends Activity {
         terminal.setBackground(shape(palette.terminal, palette.border, 20));
         root.addView(terminal, terminalParams);
 
-        root.addView(buildKeyPanel());
+        if (focusMode) root.addView(buildFocusControls());
+        else root.addView(buildKeyPanel());
         root.addView(buildCommandEntry());
     }
 
-    private View buildFocusStrip() {
+    private View buildFocusControls() {
         LinearLayout strip = horizontal();
         strip.setGravity(Gravity.CENTER_VERTICAL);
-        strip.setPadding(dp(12), dp(5), dp(12), dp(5));
+        strip.setPadding(dp(8), dp(5), dp(8), dp(5));
         strip.setBackgroundColor(palette.surface);
         TextView restore = key("≡", text("focus_exit"), () -> {
             focusMode = false;
             render();
         });
-        strip.addView(restore);
+        strip.addView(restore, new LinearLayout.LayoutParams(dp(48), dp(44)));
+        TextView keyboard = key("⇤", text("focus_keyboard"), this::toggleSoftKeyboard);
+        LinearLayout.LayoutParams keyboardParams =
+                new LinearLayout.LayoutParams(dp(48), dp(44));
+        keyboardParams.leftMargin = dp(8);
+        strip.addView(keyboard, keyboardParams);
         TextView info = label(text("focus_hint"), 11, palette.muted, false);
         info.setPadding(dp(10), 0, 0, 0);
-        strip.addView(info);
+        strip.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
         return strip;
+    }
+
+    private void toggleSoftKeyboard() {
+        if (commandInput == null || !commandInput.isEnabled()) return;
+        InputMethodManager inputMethodManager =
+                (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (inputMethodManager == null) return;
+        commandInput.requestFocus();
+        inputMethodManager.toggleSoftInput(InputMethodManager.SHOW_IMPLICIT,
+                InputMethodManager.HIDE_IMPLICIT_ONLY);
     }
 
     private View buildKeyPanel() {
@@ -488,6 +536,7 @@ public final class MainActivity extends Activity {
     private TextView key(String title, String description, Runnable action) {
         TextView key = label(title, 12, palette.text, true);
         key.setGravity(Gravity.CENTER);
+        key.setMinWidth(dp(44));
         key.setMinHeight(dp(44));
         key.setBackground(shape(palette.key, palette.border, 11));
         key.setContentDescription(description);
@@ -870,6 +919,7 @@ public final class MainActivity extends Activity {
                 {"system", text("theme_system")},
                 {"light", text("theme_light")},
                 {"dark", text("theme_dark")},
+                {"amoled", text("theme_amoled")},
                 {"dracula", "Dracula"}
         };
         for (String[] option : themes) {
@@ -933,7 +983,7 @@ public final class MainActivity extends Activity {
         }));
         content.addView(runtimeCard);
         addGap(content, 12);
-        content.addView(secondaryButton(text("action_guide"), () -> navigate(SCREEN_GUIDE)));
+        content.addView(secondaryButton(text("action_guide"), this::showOnboarding));
         addGap(content, 16);
         content.addView(label(text("settings_storage_note"), 12, palette.muted, false));
     }
@@ -963,49 +1013,6 @@ public final class MainActivity extends Activity {
         choice.setOnClickListener(v -> listener.onSelect(id));
         parent.addView(choice);
         addGap(parent, 7);
-    }
-
-    private void buildGuide(LinearLayout content) {
-        TextView eyebrow = label(text("guide_eyebrow"), 11, palette.accent, true);
-        eyebrow.setLetterSpacing(0.1f);
-        content.addView(eyebrow);
-        addGap(content, 8);
-        content.addView(label(text("guide_title"), 28, palette.text, true));
-        addGap(content, 8);
-        content.addView(label(text("guide_intro"), 14, palette.muted, false));
-        addGap(content, 19);
-        addGuideStep(content, "01", text("guide_step1_title"), text("guide_step1_body"));
-        addGap(content, 9);
-        addGuideStep(content, "02", text("guide_step2_title"), text("guide_step2_body"));
-        addGap(content, 9);
-        addGuideStep(content, "03", text("guide_step3_title"), text("guide_step3_body"));
-        addGap(content, 17);
-        content.addView(sectionTitle(text("guide_privacy_title")));
-        addGap(content, 8);
-        LinearLayout privacy = card();
-        privacy.addView(label(text("guide_privacy_body"), 13, palette.muted, false));
-        content.addView(privacy);
-        addGap(content, 16);
-        content.addView(secondaryButton(text("action_prepare"), this::prepareEnvironment));
-    }
-
-    private void addGuideStep(LinearLayout parent, String number, String title, String description) {
-        LinearLayout step = card();
-        LinearLayout row = horizontal();
-        TextView badge = label(number, 12, palette.accent, true);
-        badge.setGravity(Gravity.CENTER);
-        badge.setBackground(shape(palette.accentSoft, palette.accentSoft, 13));
-        badge.setWidth(dp(38));
-        badge.setHeight(dp(38));
-        row.addView(badge);
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(dp(11), 0, 0, 0);
-        body.addView(label(title, 14, palette.text, true));
-        body.addView(label(description, 12, palette.muted, false));
-        row.addView(body, new LinearLayout.LayoutParams(0, -2, 1));
-        step.addView(row);
-        parent.addView(step);
     }
 
     private void buildSetup(LinearLayout content) {
@@ -1038,7 +1045,7 @@ public final class MainActivity extends Activity {
         addGap(content, 8);
         content.addView(secondaryButton(text("action_console"), () -> navigate(SCREEN_CONSOLE)));
         addGap(content, 8);
-        content.addView(secondaryButton(text("action_guide"), () -> navigate(SCREEN_GUIDE)));
+        content.addView(secondaryButton(text("action_guide"), this::showOnboarding));
     }
 
     private void addSetupItem(LinearLayout parent, String number, String title, String status) {
@@ -1153,30 +1160,36 @@ public final class MainActivity extends Activity {
             case "nav_home": return ukrainian ? "Головна" : "Home";
             case "nav_console": return ukrainian ? "Консоль" : "Console";
             case "nav_settings": return ukrainian ? "Візуал" : "Visuals";
-            case "home_eyebrow": return ukrainian ? "ВАШ ПРОСТІР ДЛЯ РОЗРОБКИ" : "YOUR MOBILE DEV SPACE";
-            case "home_title": return ukrainian ? "OpenCode.\nПрямо на Android." : "OpenCode.\nOn your terms.";
-            case "home_description": return ukrainian ? "Локальне Linux-середовище для роботи з агентом кодування." : "A Linux workspace on your phone, ready for your coding agent.";
-            case "runtime_title": return ukrainian ? "Середовище ще не встановлено" : "Linux runtime not installed";
-            case "runtime_explanation": return ukrainian ? "Коли Linux runtime буде готовий, тут з’явиться запуск OpenCode, вебінтерфейсу та shell." : "OpenCode, its web UI and a Linux shell become available after a verified runtime is installed.";
-            case "runtime_ready_explanation": return ukrainian ? "Середовище Debian зберігає конфігурацію OpenCode і робочі файли між запусками." : "Debian is ready. OpenCode settings and workspace files persist between sessions.";
+            case "home_not_ready": return ukrainian
+                    ? "Середовище ще не встановлено" : "Environment not installed";
+            case "home_linux_ready": return ukrainian
+                    ? "Debian готовий · залишився OpenCode" : "Debian is ready · OpenCode is next";
+            case "home_ready": return ukrainian
+                    ? "OpenCode готовий до запуску" : "OpenCode is ready";
+            case "onboarding_step1_title": return ukrainian ? "Підготовка" : "Set up";
+            case "onboarding_step1_body": return ukrainian
+                    ? "Застосунок завантажить Debian та OpenCode. Потрібні інтернет і вільне місце на пристрої."
+                    : "The app downloads Debian and OpenCode. Internet access and free device storage are required.";
+            case "onboarding_step2_title": return ukrainian ? "Консоль і керування" : "Console controls";
+            case "onboarding_step2_body": return ukrainian
+                    ? "Відкрийте OpenCode у консолі. Нижня панель містить службові клавіші; режим фокусу приховує зайві елементи."
+                    : "Open OpenCode in the console. The bottom panel has terminal keys; focus mode hides the extras.";
+            case "onboarding_step3_title": return ukrainian ? "Налаштуйте під себе" : "Make it yours";
+            case "onboarding_step3_body": return ukrainian
+                    ? "У налаштуваннях є теми, шрифти та короткий посібник. Ключі провайдера налаштовуються в OpenCode."
+                    : "Settings include themes, fonts and this guide. Configure provider credentials inside OpenCode.";
+            case "onboarding_show_at_start": return ukrainian
+                    ? "Показувати при старті" : "Show at startup";
+            case "action_next": return ukrainian ? "Далі" : "Next";
+            case "action_back": return ukrainian ? "Назад" : "Back";
+            case "action_skip": return ukrainian ? "Пропустити" : "Skip";
+            case "action_done": return ukrainian ? "Готово" : "Done";
             case "status_running": return ukrainian ? "Працює" : "Running";
             case "status_web": return ukrainian ? "Вебсервер працює" : "Web server running";
             case "status_shell": return ukrainian ? "Shell працює" : "Shell running";
             case "status_ready": return ukrainian ? "OpenCode готовий" : "OpenCode ready";
             case "status_linux_ready": return ukrainian ? "Linux готовий" : "Linux ready";
-            case "os_heading": return ukrainian ? "Операційна система" : "Choose your Linux";
             case "debian_title": return "Debian Slim";
-            case "debian_description": return ukrainian ? "Компактна система. Рекомендовано для першого запуску." : "A lean base system. A great place to start.";
-            case "ubuntu_title": return "Ubuntu Minimal";
-            case "ubuntu_description": return ukrainian ? "Знайоме мінімальне середовище Ubuntu." : "A familiar, minimal Ubuntu environment.";
-            case "recommended": return ukrainian ? "Рекомендовано" : "Recommended";
-            case "arch_badge": return ukrainian
-                    ? "Перевірена ціль · Debian Trixie ARM64"
-                    : "Verified target · Debian Trixie ARM64";
-            case "unavailable": return ukrainian ? "Поки недоступно" : "Not available yet";
-            case "ubuntu_unavailable": return ukrainian ? "Ubuntu ще не має перевіреного образу для цього runtime." : "No verified Ubuntu image is available for this runtime yet.";
-            case "tool_description": return ukrainian ? "AI-агент для програмування" : "The AI coding agent";
-            case "tool_auth_note": return ukrainian ? "Ви самостійно налаштовуєте провайдера й авторизацію в OpenCode." : "Provider credentials are configured by you, directly in OpenCode.";
             case "action_prepare": return ukrainian ? "Підготувати середовище" : "Prepare environment";
             case "action_opencode": return ukrainian ? "Запустити OpenCode" : "Start OpenCode";
             case "action_shell": return ukrainian ? "Відкрити shell" : "Open shell";
@@ -1185,22 +1198,24 @@ public final class MainActivity extends Activity {
             case "action_cancel": return ukrainian ? "Скасувати" : "Cancel";
             case "action_console": return ukrainian ? "Відкрити консоль" : "Open console";
             case "action_guide": return ukrainian ? "Початок роботи" : "Getting started";
-            case "storage_note": return ukrainian ? "Ваші файли, проєкти й налаштування мають зберігатися окремо від системи." : "Your files, projects and settings should live separately from the Linux system.";
             case "terminal_hint": return ukrainian
-                    ? "Вітаємо в OpenCode Android.\n\nПідготуйте Debian, щоб запустити OpenCode або shell.\nРобочі файли зберігаються у приватному сховищі застосунку."
-                    : "Welcome to OpenCode Android.\n\nPrepare Debian to start OpenCode or a shell.\nWorkspace files persist in the app's private storage.";
+                    ? "Консоль готова. Підготуйте середовище, щоб почати."
+                    : "Console ready. Prepare the environment to begin.";
             case "console_title": return ukrainian ? "Сесія термінала" : "Terminal session";
             case "focus_exit": return ukrainian ? "Повернути панель" : "Show controls";
             case "focus_hint": return ukrainian ? "Режим фокусу · натисніть ≡, щоб повернути панель" : "Focus mode · tap ≡ to restore controls";
+            case "focus_keyboard": return ukrainian
+                    ? "Показати або сховати клавіатуру" : "Show or hide the keyboard";
             case "command_hint": return ukrainian ? "Команда або повідомлення…" : "Type a command or message…";
             case "action_send": return ukrainian ? "Надіслати команду" : "Send command";
-            case "settings_title": return ukrainian ? "Налаштування вигляду" : "Make it yours";
+            case "settings_title": return ukrainian ? "Налаштування" : "Settings";
             case "settings_intro": return ukrainian ? "Оберіть тему й шрифт термінала." : "Choose a theme and a typeface for your terminal.";
             case "appearance_heading": return ukrainian ? "Зовнішній вигляд" : "Appearance";
             case "theme_heading": return ukrainian ? "Тема" : "Theme";
             case "theme_system": return ukrainian ? "Як у системі" : "Follow system";
             case "theme_light": return ukrainian ? "Світла" : "Light";
             case "theme_dark": return ukrainian ? "Темна" : "Dark";
+            case "theme_amoled": return ukrainian ? "Темна AMOLED" : "AMOLED black";
             case "font_heading": return ukrainian ? "Моноширинний шрифт" : "Terminal font";
             case "font_size_heading": return ukrainian ? "Розмір тексту термінала" : "Terminal text size";
             case "font_jetbrains": return ukrainian ? "Чіткий і збалансований" : "Crisp, carefully balanced";
@@ -1210,22 +1225,13 @@ public final class MainActivity extends Activity {
             case "font_ubuntu": return ukrainian ? "Відкриті форми літер" : "Distinctive open letterforms";
             case "environment_heading": return ukrainian ? "Середовище" : "Environment";
             case "selected_system": return ukrainian ? "Вибраний дистрибутив" : "Selected distribution";
-            case "settings_storage_note": return ukrainian ? "Тема, шрифт і дистрибутив зберігаються на пристрої." : "Your theme, font and distribution choice are saved on this device.";
+            case "settings_storage_note": return ukrainian
+                    ? "Налаштування вигляду й сумісності зберігаються на пристрої."
+                    : "Appearance and compatibility preferences stay on this device.";
             case "compat_heading": return ukrainian ? "Сумісність chroot-ng" : "chroot-ng compatibility";
             case "compat_description": return ukrainian ? "Увімкніть переписування системних викликів, якщо звичайний запуск не працює на вашому пристрої." : "Enable syscall rewriting only if the default runtime fails on your device.";
             case "compat_on": return ukrainian ? "Увімкнено · натисніть, щоб вимкнути" : "Enabled · tap to disable";
             case "compat_off": return ukrainian ? "Вимкнено · натисніть, щоб увімкнути" : "Disabled · tap to enable";
-            case "guide_eyebrow": return ukrainian ? "ЛАСКАВО ПРОСИМО" : "WELCOME";
-            case "guide_title": return ukrainian ? "Початок роботи" : "A good place to start";
-            case "guide_intro": return ukrainian ? "OpenCode Android створено, щоб зручно запускати інструменти розробника в Linux-середовищі на Android." : "OpenCode Android is designed to bring a comfortable Linux development workspace to your Android device.";
-            case "guide_step1_title": return ukrainian ? "Підготуйте Linux" : "Set up Linux";
-            case "guide_step1_body": return ukrainian ? "Підготуйте Debian Trixie для ARM64. Rootfs завантажується з офіційного образу та перевіряється за SHA-256." : "Prepare Debian Trixie for ARM64. The rootfs comes from the official image and is checked by SHA-256.";
-            case "guide_step2_title": return ukrainian ? "Налаштуйте OpenCode" : "Configure OpenCode";
-            case "guide_step2_body": return ukrainian ? "Встановлення використовує офіційний пакет npm. Налаштуйте провайдера всередині OpenCode." : "Installation uses the official npm package. Configure your provider inside OpenCode.";
-            case "guide_step3_title": return ukrainian ? "Працюйте локально" : "Work locally";
-            case "guide_step3_body": return ukrainian ? "Використовуйте TUI, shell або вебінтерфейс, прив’язаний лише до localhost." : "Use the TUI, shell or a web interface bound to localhost.";
-            case "guide_privacy_title": return ukrainian ? "Ваші облікові дані — ваші" : "Your credentials stay yours";
-            case "guide_privacy_body": return ukrainian ? "Застосунок не збирає API-ключі. Вебсервер доступний лише через 127.0.0.1; встановлення потребує інтернету." : "The app does not collect API keys. The web server binds to 127.0.0.1; installation requires internet access.";
             case "setup_title": return ukrainian ? "Підготовка Linux" : "Prepare Linux";
             case "setup_intro": return ukrainian ? "Перевірений шлях встановлення складається з трьох кроків." : "A verified environment needs three installation steps.";
             case "setup_step_rootfs": return ukrainian ? "Rootfs Debian Trixie" : "Debian Trixie rootfs";
@@ -1300,11 +1306,16 @@ public final class MainActivity extends Activity {
                         0xFF191A23, 0xFFF8F8F2, 0xFFF8F8F2, 0xFFB8B8C5, 0xFFBD93F9,
                         0xFF393347, 0xFFFFB86C, 0xFF45362A, 0xFF424554, false);
             }
+            if ("amoled".equals(theme)) {
+                return new Palette(0xFF000000, 0xFF080808, 0xFF050505, 0xFF101010,
+                        0xFF000000, 0xFFF0F2EF, 0xFFF0F2EF, 0xFF9CA5A0, 0xFF91D4B0,
+                        0xFF10251A, 0xFFFFD18B, 0xFF302416, 0xFF202020, false);
+            }
             boolean dark = "dark".equals(theme) || ("system".equals(theme) && systemDark);
             if (dark) {
-                return new Palette(0xFF111318, 0xFF1A1D24, 0xFF11141A, 0xFF22262E,
-                        0xFF0D1015, 0xFFDCE4E0, 0xFFE9ECE9, 0xFF9BA5A1, 0xFF83B89D,
-                        0xFF22352D, 0xFFF0C27B, 0xFF3B3224, 0xFF2B3038, false);
+                return new Palette(0xFF070809, 0xFF111315, 0xFF080A0B, 0xFF171A1C,
+                        0xFF020303, 0xFFE0E7E3, 0xFFF0F2EF, 0xFFA0A8A4, 0xFF8ACBA7,
+                        0xFF17291F, 0xFFF0C27B, 0xFF322A1E, 0xFF25292A, false);
             }
             return new Palette(0xFFF5F5F2, 0xFFFFFFFF, 0xFFF8F8F6, 0xFFFAFAF9,
                     0xFF20252B, 0xFFE4EAE7, 0xFF202722, 0xFF717973, 0xFF537A64,

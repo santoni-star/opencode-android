@@ -218,7 +218,9 @@ public final class Session {
 
     /** Best-effort cleanup for OpenCode and chroot processes left by Android. */
     public static void killLeftovers() {
-        sweep("[o]pencode", "[c]hroot-ng");
+        // Match guest executables only; a generic "opencode" pattern also matches this app.
+        sweep("[l]ibchrootng.so", "[/]usr/local/bin/opencode",
+                "[/]usr/bin/opencode", "[/]usr/local/lib/node_modules/@opencode/cli/");
     }
 
     /** {@code Process.isAlive()} is API 26, so probe the exit value instead. */
