@@ -82,10 +82,10 @@ public final class GuestCommand {
             args.add("-f");
             args.add("-e");
             args.add("-c");
-            args.add("/bin/bash /opt/loader/init.sh " + mode);
+            args.add("/bin/sh /opt/loader/init.sh " + mode);
             args.add("/dev/null");
         } else {
-            args.add("/bin/bash");
+            args.add("/bin/sh");
             args.add("/opt/loader/init.sh");
             args.add(mode);
         }

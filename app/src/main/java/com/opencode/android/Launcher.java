@@ -100,7 +100,8 @@ public final class Launcher {
                 }
             }
 
-            boolean pty = !GuestCommand.MODE_WEB.equals(mode)
+            boolean pty = prefs.pty()
+                    && !GuestCommand.MODE_WEB.equals(mode)
                     && GuestCommand.scriptAvailable(env);
             startSession(env, prefs, mode, pty);
             ui.status(GuestCommand.MODE_WEB.equals(mode) ? "Starting web UI" : "Running");

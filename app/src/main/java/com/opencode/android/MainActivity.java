@@ -65,6 +65,7 @@ public final class MainActivity extends Activity {
     private ScrollView mainScroll;
     private String mainScrollScreen;
     private EditText commandInput;
+    private TextView commandSendButton;
     private TerminalView terminal;
     private WebView webView;
     private boolean terminalInitialized;
@@ -443,6 +444,12 @@ public final class MainActivity extends Activity {
             controls.setPadding(dp(12), dp(8), dp(12), dp(3));
             TextView title = label(text("console_title"), 14, palette.text, true);
             controls.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+            boolean rootfsReady = Env.get(this).rootfsInstalled();
+            controls.addView(smallButton(rootfsReady ? text("action_shell") : text("action_prepare"),
+                    () -> {
+                        if (rootfsReady) launchMode(GuestCommand.MODE_SHELL, SCREEN_CONSOLE);
+                        else prepareEnvironment();
+                    }));
             controls.addView(smallButton(text("action_web"),
                     () -> launchMode(GuestCommand.MODE_WEB, SCREEN_WEB)));
             controls.addView(smallButton(text("action_stop"), this::stopRuntime));
@@ -452,8 +459,7 @@ public final class MainActivity extends Activity {
         if (terminal == null) terminal = new TerminalView(this);
         ViewGroup oldParent = (ViewGroup) terminal.getParent();
         if (oldParent != null) oldParent.removeView(terminal);
-        terminal.setTypeface(Typeface.createFromAsset(getAssets(), fontAsset()));
-        terminal.setFontFeatureSettings("firacode".equals(font) ? "'calt'" : "");
+        applySelectedFont();
         terminal.setFontSp(terminalFontSize);
         if (!terminalInitialized) {
             terminal.clear();
@@ -576,13 +582,13 @@ public final class MainActivity extends Activity {
         commandInput.setTextColor(palette.text);
         commandInput.setHintTextColor(palette.muted);
         commandInput.setHint(text("command_hint"));
-        commandInput.setTypeface(Typeface.createFromAsset(getAssets(), fontAsset()));
-        if ("firacode".equals(font)) commandInput.setFontFeatureSettings("'calt'");
+        applySelectedFont();
         commandInput.setPadding(dp(11), 0, dp(8), 0);
         commandInput.setBackground(shape(palette.input, palette.border, 13));
         commandInput.setText(commandDraft);
         commandInput.setSelection(commandInput.length());
-        commandInput.setEnabled(Session.get().running() && !busy);
+        boolean canSubmit = Session.get().running() && !busy;
+        commandInput.setEnabled(canSubmit);
         commandInput.setImeOptions(EditorInfo.IME_ACTION_SEND);
         commandInput.setOnEditorActionListener((view, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEND) {
@@ -606,13 +612,19 @@ public final class MainActivity extends Activity {
         entry.addView(commandInput, new LinearLayout.LayoutParams(0, dp(48), 1));
 
         TextView send = label("↑", 20, Color.WHITE, true);
+        commandSendButton = send;
         send.setGravity(Gravity.CENTER);
         send.setContentDescription(text("action_send"));
-        send.setBackground(shape(palette.accent, palette.accent, 13));
+        send.setEnabled(canSubmit);
+        send.setAlpha(canSubmit ? 1f : 0.45f);
+        send.setBackground(shape(canSubmit ? palette.accent : palette.input,
+                canSubmit ? palette.accent : palette.border, 13));
         LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         sendParams.leftMargin = dp(8);
         entry.addView(send, sendParams);
-        send.setOnClickListener(v -> sendCommand());
+        send.setOnClickListener(v -> {
+            if (canSubmit) sendCommand();
+        });
         return entry;
     }
 
@@ -735,8 +747,18 @@ public final class MainActivity extends Activity {
                     if (!value) {
                         runtimeStage = null;
                         refreshStatus();
-                        if (SCREEN_CONSOLE.equals(screen) && commandInput != null) {
-                            commandInput.setEnabled(Session.get().running());
+                        if (SCREEN_CONSOLE.equals(screen)) {
+                            boolean canSubmit = Session.get().running() && !busy;
+                            if (commandInput != null) {
+                                commandInput.setEnabled(canSubmit);
+                            }
+                            if (commandSendButton != null) {
+                                commandSendButton.setEnabled(canSubmit);
+                                commandSendButton.setAlpha(canSubmit ? 1f : 0.45f);
+                                commandSendButton.setBackground(shape(
+                                        canSubmit ? palette.accent : palette.input,
+                                        canSubmit ? palette.accent : palette.border, 13));
+                            }
                         }
                     }
                 });
@@ -946,6 +968,7 @@ public final class MainActivity extends Activity {
                     value -> {
                         font = value;
                         preferences.edit().putString("font", value).apply();
+                        applySelectedFont();
                         render();
                     });
         }
@@ -972,13 +995,13 @@ public final class MainActivity extends Activity {
         content.addView(distroCard);
         addGap(content, 12);
         LinearLayout runtimeCard = card();
-        runtimeCard.addView(label(text("compat_heading"), 14, palette.text, true));
+        runtimeCard.addView(label(text("pty_heading"), 14, palette.text, true));
         addGap(runtimeCard, 4);
-        runtimeCard.addView(label(text("compat_description"), 12, palette.muted, false));
+        runtimeCard.addView(label(text("pty_description"), 12, palette.muted, false));
         addGap(runtimeCard, 8);
-        runtimeCard.addView(secondaryButton(runtimePrefs.compatMode()
-                ? text("compat_on") : text("compat_off"), () -> {
-            runtimePrefs.compatMode(!runtimePrefs.compatMode());
+        runtimeCard.addView(secondaryButton(runtimePrefs.pty()
+                ? text("pty_on") : text("pty_off"), () -> {
+            runtimePrefs.pty(!runtimePrefs.pty());
             render();
         }));
         content.addView(runtimeCard);
@@ -1228,10 +1251,10 @@ public final class MainActivity extends Activity {
             case "settings_storage_note": return ukrainian
                     ? "Налаштування вигляду й сумісності зберігаються на пристрої."
                     : "Appearance and compatibility preferences stay on this device.";
-            case "compat_heading": return ukrainian ? "Сумісність chroot-ng" : "chroot-ng compatibility";
-            case "compat_description": return ukrainian ? "Увімкніть переписування системних викликів, якщо звичайний запуск не працює на вашому пристрої." : "Enable syscall rewriting only if the default runtime fails on your device.";
-            case "compat_on": return ukrainian ? "Увімкнено · натисніть, щоб вимкнути" : "Enabled · tap to disable";
-            case "compat_off": return ukrainian ? "Вимкнено · натисніть, щоб увімкнути" : "Disabled · tap to enable";
+            case "pty_heading": return ukrainian ? "PTY термінала" : "Terminal PTY";
+            case "pty_description": return ukrainian ? "Залиште PTY увімкненим для стабільного інтерактивного вводу в Linux. Вимкніть лише для простішого стрічкового режиму." : "Keep PTY enabled for interactive Linux input. Disable it only for a simpler stream-only console.";
+            case "pty_on": return ukrainian ? "PTY увімкнено · натисніть, щоб вимкнути" : "PTY enabled · tap to disable";
+            case "pty_off": return ukrainian ? "PTY вимкнено · натисніть, щоб увімкнути" : "PTY disabled · tap to enable";
             case "setup_title": return ukrainian ? "Підготовка Linux" : "Prepare Linux";
             case "setup_intro": return ukrainian ? "Перевірений шлях встановлення складається з трьох кроків." : "A verified environment needs three installation steps.";
             case "setup_step_rootfs": return ukrainian ? "Rootfs Debian Trixie" : "Debian Trixie rootfs";
@@ -1262,6 +1285,22 @@ public final class MainActivity extends Activity {
             case "dejavu": return "fonts/DejaVuSansMono.ttf";
             case "ubuntu": return "fonts/UbuntuMono-Regular.ttf";
             default: return "fonts/JetBrainsMono-Regular.ttf";
+        }
+    }
+
+    private void applySelectedFont() {
+            String asset = fontAsset();
+            android.util.Log.d("OpenCodeFont", "applySelectedFont: font=" + font + " asset=" + asset);
+            Typeface selectedTypeface = Typeface.createFromAsset(getAssets(), asset);
+            android.util.Log.d("OpenCodeFont", "applySelectedFont: typeface=" + (selectedTypeface != null ? selectedTypeface.toString() : "NULL"));
+        String features = "firacode".equals(font) ? "'calt'" : "";
+        if (terminal != null) {
+            terminal.setTypeface(selectedTypeface);
+            terminal.setFontFeatureSettings(features);
+        }
+        if (commandInput != null) {
+            commandInput.setTypeface(selectedTypeface);
+            commandInput.setFontFeatureSettings(features);
         }
     }
 

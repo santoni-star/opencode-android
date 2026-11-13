@@ -1,8 +1,11 @@
-#!/bin/bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 export HOME=/home/opencode
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH="$HOME/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export LD_LIBRARY_PATH="/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu"
+export TMPDIR="$HOME/.cache"
+mkdir -p "$TMPDIR"
 cd "$HOME/workspace"
 
 MODE="${1:-tui}"
@@ -21,7 +24,7 @@ case "$MODE" in
         ;;
     update)
         printf '[OPENCODE] Updating the official CLI package…\n'
-        npm install --global --no-audit --no-fund @opencode/cli@latest
+        curl -fsSL https://opencode.ai/v2/install | bash
         opencode --version
         ;;
     tui)

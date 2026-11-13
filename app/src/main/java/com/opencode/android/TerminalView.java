@@ -185,6 +185,8 @@ public class TerminalView extends ScrollView {
     public void setTypeface(Typeface typeface) {
         text.setTypeface(typeface == null ? Typeface.MONOSPACE : typeface);
         syncScreenSize();
+        text.requestLayout();
+        text.invalidate();
     }
 
     public void setFontFeatureSettings(String settings) {
