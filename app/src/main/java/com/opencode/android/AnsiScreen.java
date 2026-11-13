@@ -611,23 +611,6 @@ final class AnsiScreen {
                         }
                     }
 
-                    private void setAlternateBuffer(boolean enabled) {
-                        if (enabled == alternateBuffer) return;
-                        if (enabled) {
-                            primaryBuffer = new SpannableStringBuilder(buf);
-                            primaryCursor = cursor;
-                            primarySavedCursor = savedCursor;
-                            buf.clear();
-                            cursor = 0;
-                            savedCursor = -1;
-                        } else if (primaryBuffer != null) {
-                            buf.replace(0, buf.length(), primaryBuffer);
-                            cursor = Math.min(primaryCursor, buf.length());
-                            savedCursor = primarySavedCursor;
-                            primaryBuffer = null;
-                        }
-                        alternateBuffer = enabled;
-                    }
                 }
                 break;
 
@@ -769,6 +752,24 @@ final class AnsiScreen {
                 // regions and device reports are irrelevant for this view.
                 break;
         }
+    }
+
+    private void setAlternateBuffer(boolean enabled) {
+        if (enabled == alternateBuffer) return;
+        if (enabled) {
+            primaryBuffer = new SpannableStringBuilder(buf);
+            primaryCursor = cursor;
+            primarySavedCursor = savedCursor;
+            buf.clear();
+            cursor = 0;
+            savedCursor = -1;
+        } else if (primaryBuffer != null) {
+            buf.replace(0, buf.length(), primaryBuffer);
+            cursor = Math.min(primaryCursor, buf.length());
+            savedCursor = primarySavedCursor;
+            primaryBuffer = null;
+        }
+        alternateBuffer = enabled;
     }
 
     private int cursorAtScreenRow(int row, int col) {
