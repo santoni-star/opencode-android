@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">OpenCode Android</string>
+    <string name="channel_name">Сесія OpenCode</string>
+    <string name="channel_description">Підтримує роботу локального Linux-середовища</string>
+    <string name="notif_title">OpenCode працює</string>
+    <string name="notif_text">Натисніть, щоб повернутися до робочого простору</string>
+    <string name="notif_stop">Зупинити</string>
+</resources>

@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">OpenCode Android</string>
+    <string name="channel_name">OpenCode session</string>
+    <string name="channel_description">Keeps the local Linux session running</string>
+    <string name="notif_title">OpenCode is running</string>
+    <string name="notif_text">Tap to return to your workspace</string>
+    <string name="notif_stop">Stop</string>
+</resources>
